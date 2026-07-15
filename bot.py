@@ -19,10 +19,10 @@ from aiogram.types import (
 # =========================================================
 
 BOT_TOKEN = "PASTE_BOT_TOKEN_HERE"
-ADMIN_ID = 0
+ADMIN_ID = 7407301486
 
-CHANNEL_1_LINK = "PASTE_CHANNEL_1_LINK_HERE"
-CHANNEL_2_LINK = "PASTE_CHANNEL_2_LINK_HERE"
+CHANNEL_1_LINK = "https://t.me/bhai_join_korle"
+CHANNEL_2_LINK = "https://t.me/Hyper_Aura"
 
 CASHFREE_CLIENT_ID = "PASTE_CASHFREE_CLIENT_ID_HERE"
 CASHFREE_CLIENT_SECRET = "PASTE_CASHFREE_CLIENT_SECRET_HERE"
