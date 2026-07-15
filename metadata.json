@@ -1,6 +1,0 @@
-{
-  "name": "Bharat Helpline",
-  "description": "All Indian emergency and public service helpline numbers in one click, supporting multiple languages with an intuitive design.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
