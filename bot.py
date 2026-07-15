@@ -21,8 +21,8 @@ from aiogram.types import (
 BOT_TOKEN = "PASTE_BOT_TOKEN_HERE"
 ADMIN_ID = 7407301486
 
-CHANNEL_1_LINK = "https://t.me/bhai_join_korle"
-CHANNEL_2_LINK = "https://t.me/Hyper_Aura"
+CHANNEL_1_LINK = "https://t.me/Hyper_Aura"
+CHANNEL_2_LINK = "https://t.me/bhai_join_korle"
 
 CASHFREE_CLIENT_ID = "PASTE_CASHFREE_CLIENT_ID_HERE"
 CASHFREE_CLIENT_SECRET = "PASTE_CASHFREE_CLIENT_SECRET_HERE"
@@ -833,4 +833,280 @@ async def cashfree_payout(
 
     except Exception as error:
         print(
-            "Cashfree API err
+            "Cashfree API error:",
+            error
+        )
+
+        return {
+            "success": False,
+            "status": "API_ERROR"
+        }
+
+
+# =========================================================
+# RECEIVE UPI ID
+# =========================================================
+
+@dp.message(F.text)
+async def text_handler(message: Message):
+    user_id = message.from_user.id
+
+    create_or_update_user(
+        message.from_user
+    )
+
+    state = user_states.get(user_id)
+
+    if state is None:
+        return
+
+    if state.get("state") != "waiting_upi":
+        return
+
+    if not await guard_message(message):
+        user_states.pop(
+            user_id,
+            None
+        )
+        return
+
+    upi_id = message.text.strip()
+    amount = Decimal(
+        str(state["amount"])
+    )
+
+    if not valid_upi(upi_id):
+        await message.answer(
+            "❌ <b>INVALID UPI ID</b>\n\n"
+            "Please enter a valid UPI ID.\n\n"
+            "Example: <code>name@upi</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    user_states.pop(
+        user_id,
+        None
+    )
+
+    transaction_id = (
+        f"WD_{user_id}_"
+        f"{uuid.uuid4().hex[:12].upper()}"
+    )
+
+    try:
+        db.execute(
+            "BEGIN IMMEDIATE"
+        )
+
+        user = db.execute("""
+        SELECT balance
+        FROM users
+        WHERE user_id = ?
+        """, (user_id,)).fetchone()
+
+        balance = Decimal(
+            user["balance"]
+        )
+
+        if balance < amount:
+            db.rollback()
+
+            await message.answer(
+                "❌ <b>INSUFFICIENT FUND</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        new_balance = (
+            balance - amount
+        )
+
+        db.execute("""
+        UPDATE users
+        SET balance = ?
+        WHERE user_id = ?
+        """, (
+            str(new_balance),
+            user_id
+        ))
+
+        db.execute("""
+        INSERT INTO withdrawals (
+            user_id,
+            amount,
+            transaction_id,
+            status
+        )
+        VALUES (?, ?, ?, 'PROCESSING')
+        """, (
+            user_id,
+            str(amount),
+            transaction_id
+        ))
+
+        db.commit()
+
+    except Exception as error:
+        db.rollback()
+
+        print(
+            "Withdrawal database error:",
+            error
+        )
+
+        await message.answer(
+            "❌ Withdrawal could not be started. "
+            "Please try again."
+        )
+        return
+
+    processing_message = await message.answer(
+        "⏳ <b>PROCESSING YOUR WITHDRAWAL...</b>",
+        parse_mode="HTML"
+    )
+
+    result = await cashfree_payout(
+        upi_id,
+        amount,
+        transaction_id
+    )
+
+    if result["success"] is True:
+        db.execute("""
+        UPDATE withdrawals
+        SET status = 'SUCCESS'
+        WHERE transaction_id = ?
+        """, (transaction_id,))
+
+        db.commit()
+
+        await processing_message.edit_text(
+            "✅ <b>WITHDRAWAL SUCCESSFUL!</b>\n\n"
+            f"💰 Amount: ₹{amount:.2f}\n"
+            f"💳 UPI ID: <code>{upi_id}</code>\n\n"
+            "🧾 Transaction ID:\n"
+            f"<code>{transaction_id}</code>",
+            parse_mode="HTML"
+        )
+
+    elif result["success"] is None:
+        db.execute("""
+        UPDATE withdrawals
+        SET status = 'PENDING'
+        WHERE transaction_id = ?
+        """, (transaction_id,))
+
+        db.commit()
+
+        await processing_message.edit_text(
+            "⏳ <b>WITHDRAWAL PROCESSING</b>\n\n"
+            f"💰 Amount: ₹{amount:.2f}\n\n"
+            "🧾 Transaction ID:\n"
+            f"<code>{transaction_id}</code>\n\n"
+            "Your transaction is being processed.",
+            parse_mode="HTML"
+        )
+
+    else:
+        try:
+            db.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            user = db.execute("""
+            SELECT balance
+            FROM users
+            WHERE user_id = ?
+            """, (user_id,)).fetchone()
+
+            refunded_balance = (
+                Decimal(user["balance"])
+                + amount
+            )
+
+            db.execute("""
+            UPDATE users
+            SET balance = ?
+            WHERE user_id = ?
+            """, (
+                str(refunded_balance),
+                user_id
+            ))
+
+            db.execute("""
+            UPDATE withdrawals
+            SET status = 'FAILED'
+            WHERE transaction_id = ?
+            """, (transaction_id,))
+
+            db.commit()
+
+        except Exception as error:
+            db.rollback()
+
+            print(
+                "Refund error:",
+                error
+            )
+
+        await processing_message.edit_text(
+            "❌ <b>WITHDRAWAL FAILED</b>\n\n"
+            "The withdrawal could not be completed.\n"
+            "Your wallet balance has been restored.\n\n"
+            "🧾 Transaction ID:\n"
+            f"<code>{transaction_id}</code>",
+            parse_mode="HTML"
+        )
+
+
+# =========================================================
+# BACK
+# =========================================================
+
+@dp.callback_query(F.data == "back")
+async def back_callback(callback: CallbackQuery):
+    if not await guard_callback(callback):
+        return
+
+    user_states.pop(
+        callback.from_user.id,
+        None
+    )
+
+    await callback.answer()
+    await show_home(callback.message)
+
+
+@dp.message(Command("back"))
+async def back_command(message: Message):
+    create_or_update_user(
+        message.from_user
+    )
+
+    user_states.pop(
+        message.from_user.id,
+        None
+    )
+
+    if not await guard_message(message):
+        return
+
+    await show_home(message)
+
+
+# =========================================================
+# RUN BOT
+# =========================================================
+
+async def main():
+    print("Bot is running...")
+
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types()
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
