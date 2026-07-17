@@ -22,9 +22,9 @@ from aiogram.types import (
 # YOUR SETTINGS
 # =========================================================
 
-BOT_TOKEN = "PASTE_BOT_TOKEN_HERE"
+BOT_TOKEN = os.getenv ("BOT_TOKEN")
 
-ADMIN_ID = 7407301486
+ADMIN_ID = 5977403918
 
 CHANNEL_1_LINK = "https://t.me/bhai_join_korle"
 CHANNEL_2_LINK = "https://t.me/Hyper_Aura"
